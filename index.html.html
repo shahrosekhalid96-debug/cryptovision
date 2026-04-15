@@ -679,11 +679,16 @@ const CRYPTO_IDS = [
 ];
 
 async function fetchCryptoData() {
+  console.log('\n📡 === fetchCryptoData called ===');
+  
   try {
-    console.log('🔄 Fetching crypto data (simple/price endpoint)...');
+    console.log('🔄 Attempting CoinGecko /simple/price endpoint...');
     
     const ids = CRYPTO_IDS.join(',');
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true`;
+    
+    console.log(`🌐 URL: ${url}`);
+    console.log(`📋 Requesting data for: ${CRYPTO_IDS.join(', ')}`);
     
     const response = await fetch(url, {
       method: 'GET',
@@ -692,16 +697,24 @@ async function fetchCryptoData() {
       }
     });
 
+    console.log(`📡 Response: ${response.status} ${response.statusText}`);
+    
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
     const data = await response.json();
-    console.log('✅ CoinGecko data loaded');
-    return formatSimpleData(data);
+    console.log('📥 Data received:', data);
+    console.log(`✅ CoinGecko API SUCCESS - ${Object.keys(data).length} coins`);
+    
+    const formatted = formatSimpleData(data);
+    console.log(`✅ Formatted ${formatted.length} cryptocurrencies`);
+    
+    return formatted;
 
   } catch (err) {
-    console.warn('⚠️ CoinGecko failed, trying Binance fallback...', err);
+    console.warn('⚠️ CoinGecko /simple/price failed:', err.message);
+    console.log('🔄 Trying Binance API fallback...');
     return await fetchBinanceFallback();
   }
 }
@@ -741,21 +754,42 @@ function formatSimpleData(data) {
 }
 
 async function fetchBinanceFallback() {
+  console.log('\n🔄 === Binance API Fallback ===');
+  
   try {
-    console.log('🔄 Using Binance API fallback...');
-    
     const symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'];
-    const promises = symbols.map(async symbol => {
-      const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
-      return await res.json();
+    console.log(`📋 Fetching ${symbols.length} symbols from Binance...`);
+    
+    const promises = symbols.map(async (symbol, index) => {
+      const url = `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`;
+      console.log(`  ${index + 1}. Fetching ${symbol}...`);
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.warn(`  ⚠️ ${symbol} failed: ${res.status}`);
+        return null;
+      }
+      const data = await res.json();
+      console.log(`  ✅ ${symbol}: $${parseFloat(data.lastPrice).toFixed(2)}`);
+      return data;
     });
     
     const results = await Promise.all(promises);
-    console.log('✅ Binance data loaded');
+    const validResults = results.filter(r => r !== null);
     
-    return formatBinanceData(results);
+    if (validResults.length === 0) {
+      throw new Error('All Binance requests failed');
+    }
+    
+    console.log(`✅ Binance API SUCCESS - ${validResults.length}/${symbols.length} symbols loaded`);
+    
+    const formatted = formatBinanceData(validResults);
+    console.log(`✅ Formatted ${formatted.length} cryptocurrencies from Binance`);
+    
+    return formatted;
+    
   } catch (err) {
-    console.error('❌ Both APIs failed:', err);
+    console.error('❌ Binance API also failed:', err);
+    console.error('Both CoinGecko and Binance APIs failed!');
     showToast('⚠️ Unable to load data. Check internet connection.');
     return null;
   }
@@ -785,12 +819,13 @@ function formatBinanceData(data) {
 }
 
 async function fetchHistoricalData(cryptoId, days = 90) {
+  console.log(`\n📊 fetchHistoricalData called for ${cryptoId}, ${days} days`);
+  
   try {
-    console.log(`🔄 Fetching ${days} days historical data for ${cryptoId}...`);
-    
-    // Use simple endpoint for historical data
     const url = `https://api.coingecko.com/api/v3/coins/${cryptoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
+    console.log(`🌐 URL: ${url}`);
     
+    console.log('⏳ Sending request...');
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -798,44 +833,86 @@ async function fetchHistoricalData(cryptoId, days = 90) {
       }
     });
 
+    console.log(`📡 Response status: ${response.status} ${response.statusText}`);
+    
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
+    console.log('📥 Parsing JSON...');
     const data = await response.json();
-    console.log(`✅ Loaded ${data.prices?.length || 0} price points`);
+    
+    console.log(`✅ Data received:`, {
+      hasPrices: !!data.prices,
+      pricesLength: data.prices?.length,
+      hasVolumes: !!data.total_volumes,
+      volumesLength: data.total_volumes?.length,
+      hasMarketCaps: !!data.market_caps,
+      marketCapsLength: data.market_caps?.length
+    });
+    
+    if (!data.prices || data.prices.length === 0) {
+      console.warn('⚠️ No price data in response, generating mock data');
+      return generateMockHistoricalData(days);
+    }
+    
+    console.log(`✅ Historical data loaded successfully: ${data.prices.length} price points`);
     return data;
 
   } catch (err) {
     console.error('❌ Historical data fetch failed:', err);
-    showToast('⚠️ Historical data unavailable. Using limited data.');
+    console.error('Error details:', {
+      name: err.name,
+      message: err.message,
+      stack: err.stack
+    });
     
-    // Return mock data as fallback
+    console.log('🔄 Falling back to mock data...');
+    showToast('⚠️ Using simulated data (API unavailable)');
+    
     return generateMockHistoricalData(days);
   }
 }
 
 function generateMockHistoricalData(days) {
+  console.log(`🎲 Generating mock historical data for ${days} days`);
+  
   const now = Date.now();
   const oneDayMs = 24 * 60 * 60 * 1000;
   const prices = [];
   const volumes = [];
+  const marketCaps = [];
   
-  let basePrice = 50000;
+  // Use current price from selected crypto if available
+  let basePrice = state.selected?.current_price || 50000;
+  console.log(`💰 Base price: $${basePrice}`);
   
+  // Generate realistic historical trend
   for (let i = days; i >= 0; i--) {
     const timestamp = now - (i * oneDayMs);
-    const randomChange = (Math.random() - 0.5) * 2000;
-    basePrice += randomChange;
     
-    prices.push([timestamp, basePrice]);
-    volumes.push([timestamp, Math.random() * 1000000000]);
+    // Gradual trend with some volatility
+    const trendFactor = (days - i) / days; // 0 to 1
+    const volatility = basePrice * 0.02; // 2% daily volatility
+    const randomChange = (Math.random() - 0.5) * volatility;
+    const trendChange = trendFactor * basePrice * 0.1; // 10% total trend
+    
+    const price = basePrice * 0.9 + trendChange + randomChange;
+    const volume = Math.random() * 1000000000 + 500000000; // 500M to 1.5B
+    const marketCap = price * 19000000; // Approximate market cap
+    
+    prices.push([timestamp, price]);
+    volumes.push([timestamp, volume]);
+    marketCaps.push([timestamp, marketCap]);
   }
+  
+  console.log(`✅ Generated ${prices.length} mock data points`);
+  console.log(`📈 Price range: $${Math.min(...prices.map(p => p[1])).toFixed(2)} - $${Math.max(...prices.map(p => p[1])).toFixed(2)}`);
   
   return {
     prices,
     total_volumes: volumes,
-    market_caps: prices.map(p => [p[0], p[1] * 19000000])
+    market_caps: marketCaps
   };
 }
 
@@ -1589,36 +1666,58 @@ let state = {
 };
 
 async function loadCryptos() {
-  if (loading) return;
+  if (loading) {
+    console.log('⏳ Already loading, ignoring duplicate call');
+    return;
+  }
+  
   loading = true;
   
   const list = document.getElementById('cryptoList');
   list.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading cryptocurrency data...</p></div>';
   
   try {
-    console.log('🚀 Loading cryptocurrency data (lightweight endpoint)...');
+    console.log('\n🚀 ===== LOADING CRYPTOCURRENCIES =====');
     
     const data = await fetchCryptoData();
     
     if (!data || data.length === 0) {
-      throw new Error('No data received');
+      throw new Error('No data received from API');
     }
     
     state.cryptos = data;
-    console.log(`✅ Loaded ${state.cryptos.length} cryptocurrencies`);
+    console.log(`✅ Loaded ${state.cryptos.length} cryptocurrencies successfully`);
+    console.log('Cryptos:', state.cryptos.map(c => `${c.symbol}: $${c.current_price}`));
     
     renderCryptoList();
     updateStats();
     
-    // Auto-select Bitcoin with delay (30 seconds between requests)
+    // Wait for rendering to complete, then auto-select Bitcoin
     if (state.cryptos.length > 0) {
-      await delay(2000); // 2 second delay before next request
-      await selectCrypto(state.cryptos[0]);
+      console.log('\n⏳ Waiting 3 seconds before auto-selecting Bitcoin...');
+      await delay(3000); // Increased to 3 seconds to ensure everything is loaded
+      
+      const bitcoin = state.cryptos.find(c => c.id === 'bitcoin' || c.symbol === 'BTC');
+      if (bitcoin) {
+        console.log(`\n🎯 Auto-selecting: ${bitcoin.name}`);
+        await selectCrypto(bitcoin);
+      } else {
+        console.log(`\n🎯 Auto-selecting: ${state.cryptos[0].name} (Bitcoin not found)`);
+        await selectCrypto(state.cryptos[0]);
+      }
+    } else {
+      console.warn('⚠️ No cryptocurrencies loaded, cannot auto-select');
     }
     
     showToast(`✅ Loaded ${state.cryptos.length} cryptocurrencies`);
+    console.log('✅ ===== LOAD COMPLETE =====\n');
+    
   } catch (error) {
-    console.error('❌ Error loading cryptos:', error);
+    console.error('\n❌ ===== ERROR LOADING CRYPTOCURRENCIES =====');
+    console.error('Error:', error);
+    console.error('Stack:', error.stack);
+    console.error('===============================\n');
+    
     list.innerHTML = `
       <div style="padding: 40px 20px; text-align: center;">
         <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
@@ -1631,7 +1730,7 @@ async function loadCryptos() {
         </button>
         <div style="margin-top: 20px; padding: 15px; background: rgba(14, 165, 233, 0.1); border-radius: 8px; font-size: 13px; color: var(--text-muted);">
           <strong>Troubleshooting:</strong><br>
-          • Check your internet connection<br>
+          • Check browser console (F12) for detailed errors<br>
           • Try switching networks (WiFi/Mobile data)<br>
           • Turn VPN on/off<br>
           • Wait 10-15 minutes if blocked
@@ -1640,6 +1739,7 @@ async function loadCryptos() {
     `;
   } finally {
     loading = false;
+    console.log('🔓 Loading state cleared (loadCryptos)');
   }
 }
 
@@ -1677,13 +1777,25 @@ function renderCryptoList() {
 }
 
 async function selectCrypto(crypto) {
-  if (loading) return; // Prevent double clicks
+  if (loading) {
+    console.log('⏳ Already loading, ignoring click');
+    return;
+  }
+  
   loading = true;
+  console.log(`\n🎯 ===== SELECTING ${crypto.name} =====`);
   
   state.selected = crypto;
   renderCryptoList();
   
   document.getElementById('chartTitle').textContent = `${crypto.name} (${crypto.symbol.toUpperCase()})`;
+  
+  // Show analyzing state
+  document.getElementById('probValue').textContent = '--%';
+  document.getElementById('probDirection').textContent = 'Direction: Analyzing...';
+  document.getElementById('recommendedAction').textContent = 'ANALYZING';
+  document.getElementById('actionReason').textContent = 'Waiting for data...';
+  document.getElementById('confidenceScore').textContent = '--%';
   
   showToast(`Analyzing ${crypto.name}...`);
   
@@ -1691,35 +1803,78 @@ async function selectCrypto(crypto) {
     // Use 90 days max for stability
     const days = Math.min(state.timeframe, 90);
     
-    console.log(`Fetching historical data for ${crypto.name} (${days} days)...`);
+    console.log(`📊 Step 1: Fetching historical data (${days} days)...`);
     const data = await fetchHistoricalData(crypto.id, days);
     
-    if (!data || !data.prices || !Array.isArray(data.prices)) {
+    if (!data) {
+      console.error('❌ No data returned from fetchHistoricalData');
+      throw new Error('Failed to fetch historical data');
+    }
+    
+    if (!data.prices || !Array.isArray(data.prices)) {
+      console.error('❌ Invalid data format:', data);
       throw new Error('Invalid historical data format');
     }
     
     const prices = data.prices;
     const volume = data.total_volumes || [];
     
-    console.log(`✅ Loaded ${prices.length} price points`);
+    console.log(`✅ Step 1 Complete: Loaded ${prices.length} price points`);
+    console.log(`📈 Price range: $${Math.min(...prices.map(p => p[1])).toFixed(2)} - $${Math.max(...prices.map(p => p[1])).toFixed(2)}`);
     
     // Perform analysis
+    console.log('🔍 Step 2: Analyzing technical indicators...');
     const indicators = TechnicalAnalysis.analyzeAll(prices);
-    const ohlc = CandlestickPatterns.convertToOHLC(prices);
-    const patterns = CandlestickPatterns.detectPatterns(ohlc);
-    const sentiment = SentimentAnalysis.analyze(prices, volume);
-    const regime = MarketRegime.detect(prices);
+    console.log(`✅ Step 2 Complete: ${indicators.length} indicators calculated`);
+    console.log('Indicators:', indicators.map(i => `${i.name}: ${i.signal}`));
     
+    console.log('🕯️ Step 3: Detecting candlestick patterns...');
+    const ohlc = CandlestickPatterns.convertToOHLC(prices);
+    console.log(`📊 OHLC data points: ${ohlc.length}`);
+    const patterns = CandlestickPatterns.detectPatterns(ohlc);
+    console.log(`✅ Step 3 Complete: ${patterns.length} patterns detected`);
+    if (patterns.length > 0) {
+      console.log('Patterns:', patterns.map(p => p.name));
+    }
+    
+    console.log('💭 Step 4: Analyzing market sentiment...');
+    const sentiment = SentimentAnalysis.analyze(prices, volume);
+    console.log(`✅ Step 4 Complete: Sentiment = ${sentiment.toFixed(2)}`);
+    
+    console.log('📈 Step 5: Detecting market regime...');
+    const regime = MarketRegime.detect(prices);
+    console.log(`✅ Step 5 Complete: Regime = ${regime}`);
+    
+    console.log('🤖 Step 6: Running prediction engine...');
     const predEngine = new PredictionEngine();
     const prediction = predEngine.predict(prices, volume, indicators, patterns, sentiment, regime);
+    console.log('✅ Step 6 Complete: Prediction generated');
+    console.log('Prediction:', {
+      direction: prediction.direction,
+      probability: prediction.probability.toFixed(1) + '%',
+      confidence: prediction.confidence.toFixed(1) + '%',
+      action: prediction.action
+    });
     
     // Update UI
+    console.log('🎨 Step 7: Rendering UI...');
     renderChart(prices);
+    console.log('✅ Chart rendered');
+    
     renderIndicators(indicators);
+    console.log('✅ Indicators rendered');
+    
     renderPatterns(patterns);
+    console.log('✅ Patterns rendered');
+    
     renderPrediction(prediction);
+    console.log('✅ Prediction rendered');
+    
     renderRegime(regime);
+    console.log('✅ Regime rendered');
+    
     renderSentiment(sentiment);
+    console.log('✅ Sentiment rendered');
     
     // BACKTESTING DISABLED - Prevents API rate limiting
     renderBacktest({
@@ -1730,26 +1885,40 @@ async function selectCrypto(crypto) {
       modelAccuracy: 0,
       disabled: true
     });
+    console.log('✅ Backtest UI rendered');
     
+    console.log(`\n✅ ===== ${crypto.name} ANALYSIS COMPLETE =====\n`);
     showToast(`✅ ${crypto.name} analysis complete`);
+    
   } catch (error) {
-    console.error('❌ Error analyzing crypto:', error);
+    console.error('\n❌ ===== ERROR DURING ANALYSIS =====');
+    console.error('Error type:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Stack trace:', error.stack);
+    console.error('===============================\n');
+    
     showToast(`⚠️ Error analyzing ${crypto.name}. Try different crypto.`);
     
     // Show error in chart area
     document.getElementById('chartTitle').textContent = `Error loading ${crypto.name}`;
     const chartContainer = document.querySelector('.chart-container');
-    chartContainer.innerHTML = `
-      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-muted);">
-        <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
-        <p>Failed to load historical data</p>
-        <p style="font-size: 12px; margin-top: 10px; color: var(--text-muted);">
-          Try selecting a different cryptocurrency or refresh the page
-        </p>
-      </div>
-    `;
+    if (chartContainer) {
+      chartContainer.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-muted);">
+          <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+          <p>Failed to load historical data</p>
+          <p style="font-size: 12px; margin-top: 10px; color: var(--text-muted);">
+            Error: ${error.message}
+          </p>
+          <p style="font-size: 11px; margin-top: 5px; color: var(--text-muted);">
+            Check browser console (F12) for details
+          </p>
+        </div>
+      `;
+    }
   } finally {
     loading = false;
+    console.log('🔓 Loading state cleared');
   }
 }
 
