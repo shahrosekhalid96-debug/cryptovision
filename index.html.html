@@ -822,7 +822,11 @@ async function fetchHistoricalData(cryptoId, days = 90) {
   console.log(`\n📊 fetchHistoricalData called for ${cryptoId}, ${days} days`);
   
   try {
-    const url = `https://api.coingecko.com/api/v3/coins/${cryptoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
+    const proxy = "https://api.allorigins.win/raw?url=";
+
+const apiUrl = `https://api.coingecko.com/api/v3/coins/${cryptoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
+
+const url = proxy + encodeURIComponent(apiUrl);
     console.log(`🌐 URL: ${url}`);
     
     console.log('⏳ Sending request...');
@@ -1166,14 +1170,33 @@ class TechnicalAnalysis {
     const sma200 = this.calculateSMA(prices, 200);
     const bb = this.calculateBollingerBands(prices);
     
-    const currentPrice = prices[prices.length - 1][1];
-    const latestRSI = rsi[rsi.length - 1][1];
-    const latestMACD = macd.macdLine[macd.macdLine.length - 1][1];
-    const latestSignal = macd.signal[macd.signal.length - 1][1];
-    const latest50SMA = sma50[sma50.length - 1][1];
-    const latest200SMA = sma200[sma200.length - 1][1];
-    const latestBBUpper = bb.upper[bb.upper.length - 1][1];
-    const latestBBLower = bb.lower[bb.lower.length - 1][1];
+    const currentPrice = prices[prices.length - 1]?.[1] || 0;
+
+const latestRSI = rsi.length ? rsi[rsi.length - 1][1] : 50;
+
+const latestMACD = macd.macdLine.length 
+  ? macd.macdLine[macd.macdLine.length - 1][1] 
+  : 0;
+
+const latestSignal = macd.signal.length 
+  ? macd.signal[macd.signal.length - 1][1] 
+  : 0;
+
+const latest50SMA = sma50.length 
+  ? sma50[sma50.length - 1][1] 
+  : currentPrice;
+
+const latest200SMA = sma200.length 
+  ? sma200[sma200.length - 1][1] 
+  : currentPrice;
+
+const latestBBUpper = bb.upper.length 
+  ? bb.upper[bb.upper.length - 1][1] 
+  : currentPrice;
+
+const latestBBLower = bb.lower.length 
+  ? bb.lower[bb.lower.length - 1][1] 
+  : currentPrice;
     
     return [
       {
